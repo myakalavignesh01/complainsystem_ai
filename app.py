@@ -1,171 +1,153 @@
 import streamlit as st
+import numpy as np
 import pandas as pd
-from collections import Counter
+import plotly.express as px
+from datetime import datetime
+from sklearn.linear_model import LinearRegression
 
-st.set_page_config(page_title="Student Survival AI", layout="wide")
+# ===============================
+# 🔐 PASTE YOUR API KEY HERE
+# ===============================
+OPENAI_API_KEY = "sk-...GQUA"
 
-# ---- PREMIUM STYLE ----
-st.markdown("""
-<style>
-body {background:#020617;color:white;}
-.card {
-    background: linear-gradient(145deg,#1e293b,#0f172a);
-    padding:20px;
-    border-radius:20px;
-    margin-bottom:15px;
-    box-shadow:0 0 20px rgba(0,255,255,0.15);
-}
-h1, h2, h3 {color:#38bdf8;}
-</style>
-""", unsafe_allow_html=True)
+# ===============================
+# 🤖 AI FUNCTION (SAFE + FALLBACK)
+# ===============================
+def ai_solve(problem):
+    try:
+        if OPENAI_API_KEY == "sk-...GQUA":
+            raise Exception("No API Key")
 
-st.title("🚀 Student Survival AI")
-st.caption("Predict • Analyze • Solve Student Problems in Real-Time")
+        from openai import OpenAI
+        client = OpenAI(api_key=OPENAI_API_KEY)
 
-# ---- SESSION ----
-if "history" not in st.session_state:
-    st.session_state.history = []
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a network engineer AI. Give clear solutions."},
+                {"role": "user", "content": problem}
+            ]
+        )
+        return response.choices[0].message.content
 
-# ---- AI FUNCTIONS ----
-def analyze(text):
-    t = text.lower()
-    if "wifi" in t:
-        return "Network Issue"
-    elif "heat" in t or "hot" in t:
-        return "Heat Problem"
-    elif "water" in t:
-        return "Water Issue"
-    elif "electric" in t or "power" in t:
-        return "Electrical Issue"
+    except:
+        # 🔥 Fallback AI (important for demo)
+        if "slow" in problem.lower():
+            return "⚡ Network congestion detected. Reduce users or upgrade bandwidth."
+        elif "no signal" in problem.lower():
+            return "📡 Dead zone. Add router or repeater."
+        elif "disconnect" in problem.lower():
+            return "🔁 Signal instability. Check router placement."
+        else:
+            return "🛠 General issue. Optimize router placement and reduce interference."
+
+# ===============================
+# 🎨 UI
+# ===============================
+st.set_page_config(page_title="AI WiFi Solver", layout="wide")
+
+st.title("🚀 AI WiFi Problem Solver (Final System)")
+st.caption("Real AI + Backup AI • Heatmap • Smart Complaints")
+
+# ===============================
+# 📊 HEATMAP DATA
+# ===============================
+grid = st.sidebar.slider("Grid Size", 6, 20, 10)
+
+np.random.seed(42)
+signal = np.random.randint(-90, -30, (grid, grid))
+df = pd.DataFrame(signal)
+
+st.subheader("📡 WiFi Heatmap")
+fig = px.imshow(df, color_continuous_scale='RdYlGn')
+st.plotly_chart(fig, use_container_width=True)
+
+# ===============================
+# 📉 WEAK ZONES
+# ===============================
+threshold = -70
+weak = np.where(signal < threshold)
+weak_count = len(weak[0])
+
+col1, col2, col3 = st.columns(3)
+col1.metric("Weak Zones", weak_count)
+col2.metric("Avg Signal", int(np.mean(signal)))
+col3.metric("Max Signal", int(np.max(signal)))
+
+# ===============================
+# 🧠 PREDICTION
+# ===============================
+st.subheader("🧠 Prediction")
+
+X = np.arange(len(signal.flatten())).reshape(-1,1)
+y = signal.flatten()
+
+model = LinearRegression()
+model.fit(X, y)
+
+future = np.arange(len(X), len(X)+20).reshape(-1,1)
+pred = model.predict(future)
+
+st.line_chart(pred)
+
+# ===============================
+# 🤖 AI SOLVER
+# ===============================
+st.subheader("🤖 AI Problem Solver")
+
+problem = st.text_area("Enter any WiFi problem")
+
+if st.button("Solve"):
+    if problem:
+        with st.spinner("AI thinking..."):
+            solution = ai_solve(problem)
+            st.success("Solution:")
+            st.write(solution)
     else:
-        return "General Issue"
+        st.warning("Enter problem first")
 
-def solution(issue):
-    return {
-        "Network Issue": "Switch to hotspot / LAN / restart router",
-        "Heat Problem": "Check ventilation or move to cooler area",
-        "Water Issue": "Inform maintenance / use backup supply",
-        "Electrical Issue": "Check power backup or inform technician",
-        "General Issue": "Forward to admin"
-    }.get(issue)
+# ===============================
+# 📩 COMPLAINT SYSTEM
+# ===============================
+st.subheader("📩 Complaint System")
 
-def predict(history):
-    wifi = sum("wifi" in h.lower() for h in history)
-    water = sum("water" in h.lower() for h in history)
-    electric = sum("electric" in h.lower() or "power" in h.lower() for h in history)
+if "data" not in st.session_state:
+    st.session_state.data = []
 
-    alerts = []
+location = st.text_input("Location")
+issue = st.text_input("Issue")
 
-    if wifi >= 2:
-        alerts.append("🚨 WiFi issues rising! Possible outage")
-    if water >= 2:
-        alerts.append("🚨 Water shortage risk detected")
-    if electric >= 2:
-        alerts.append("🚨 Power failure risk detected")
+if st.button("Submit Complaint"):
+    solution = ai_solve(issue)
 
-    if alerts:
-        return alerts
-    return ["✅ System Stable"]
+    entry = {
+        "Location": location,
+        "Issue": issue,
+        "Solution": solution,
+        "Time": datetime.now().strftime("%H:%M:%S")
+    }
 
-# ---- PAIN INDEX ----
-pain_score = min(len(st.session_state.history) * 10, 100)
-st.metric("💔 Campus Pain Index", f"{pain_score}/100")
+    st.session_state.data.append(entry)
 
-# ---- LAYOUT ----
-col1, col2 = st.columns([2,1])
+    st.success("Complaint submitted + solved")
 
-# ---- INPUT PANEL ----
-with col1:
-    st.markdown('<div class="card">', unsafe_allow_html=True)
+# ===============================
+# 📊 DASHBOARD
+# ===============================
+st.subheader("📊 Dashboard")
 
-    st.subheader("🧑 Enter Your Problem")
-    text = st.text_area("Describe your issue")
+if st.session_state.data:
+    df2 = pd.DataFrame(st.session_state.data)
+    st.dataframe(df2)
 
-    if st.button("Analyze Problem"):
-        if text:
-            st.session_state.history.append(text)
+    chart = px.histogram(df2, x="Location")
+    st.plotly_chart(chart, use_container_width=True)
 
-            issue = analyze(text)
-
-            st.markdown("### 🧠 AI Analysis")
-            st.write(f"Detected Category: **{issue}**")
-            st.write("Reason: Keyword + pattern detection")
-
-            st.markdown("### 💡 Suggested Solution")
-            st.success(solution(issue))
-
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# ---- SIDE PANEL ----
-with col2:
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-
-    st.subheader("🚨 AI Alerts")
-    alerts = predict(st.session_state.history)
-    for a in alerts:
-        st.warning(a)
-
-    st.markdown('</div>', unsafe_allow_html=True)
-
-# ---- TOP ISSUES ----
-st.markdown('<div class="card">', unsafe_allow_html=True)
-st.subheader("🏆 Top Issues")
-
-categories = [analyze(h) for h in st.session_state.history]
-top = Counter(categories).most_common(3)
-
-if top:
-    for t in top:
-        st.write(f"🔹 {t[0]} — {t[1]} reports")
 else:
-    st.write("No data yet")
+    st.info("No data yet")
 
-st.markdown('</div>', unsafe_allow_html=True)
-
-# ---- HEATMAP ----
-st.markdown('<div class="card">', unsafe_allow_html=True)
-st.subheader("📊 Issue Zones")
-
-data = pd.DataFrame({
-    "Area": ["Hostel", "Library", "Block A"],
-    "Count": [
-        sum("hostel" in h.lower() for h in st.session_state.history),
-        sum("library" in h.lower() for h in st.session_state.history),
-        sum("block" in h.lower() for h in st.session_state.history),
-    ]
-})
-
-st.bar_chart(data.set_index("Area"))
-st.markdown('</div>', unsafe_allow_html=True)
-
-# ---- LIVE FEED ----
-st.markdown('<div class="card">', unsafe_allow_html=True)
-st.subheader("🌊 Live Campus Feed")
-
-if st.session_state.history:
-    for h in st.session_state.history[::-1]:
-        st.write(f"⚡ {h}")
-else:
-    st.write("No activity yet")
-
-st.markdown('</div>', unsafe_allow_html=True)
-
-# ---- FUTURE PREDICTION ----
-st.markdown('<div class="card">', unsafe_allow_html=True)
-st.subheader("🔮 Future Prediction")
-
-alerts = predict(st.session_state.history)
-for a in alerts:
-    st.info(a)
-
-st.markdown('</div>', unsafe_allow_html=True)
-
-# ---- OFFLINE MODE ----
-st.markdown('<div class="card">', unsafe_allow_html=True)
-st.subheader("🔌 Offline Mode")
-st.write("✔ Stores issues locally if no internet")
-st.caption("Future upgrade: sync when connection is restored")
-
-st.markdown('</div>', unsafe_allow_html=True)
-
-st.caption("🏆 Built for Hackathon — Student Survival AI")
+# ===============================
+# 🏁 FOOTER
+# ===============================
+st.markdown("---")
+st.caption("🏆 Hackathon Ready AI System")
