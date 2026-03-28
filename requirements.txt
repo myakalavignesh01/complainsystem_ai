@@ -1,2 +1,5 @@
 streamlit
 pandas
+pdfplumber
+textblob
+scikit-learn
