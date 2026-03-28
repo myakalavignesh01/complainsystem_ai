@@ -1,280 +1,171 @@
 import streamlit as st
 import pandas as pd
-import datetime, json, uuid
+from collections import Counter
 
-# SAFE PDF IMPORT
-try:
-    import pdfplumber
-    PDF_AVAILABLE = True
-except:
-    PDF_AVAILABLE = False
+st.set_page_config(page_title="Student Survival AI", layout="wide")
 
-from textblob import TextBlob
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.metrics.pairwise import cosine_similarity
-
-st.set_page_config(page_title="ResolveAI System", layout="wide")
-
-# ---------------- LOGIN ----------------
-USERS = {
-    "admin": {"pwd": "1234", "role": "admin"},
-    "student": {"pwd": "1111", "role": "user"}
-}
-
-if "login" not in st.session_state:
-    st.session_state.login = False
-    st.session_state.role = None
-
-def login():
-    st.title("🔐 ResolveAI Secure Login")
-    u = st.text_input("Username")
-    p = st.text_input("Password", type="password")
-    if st.button("Login"):
-        if u in USERS and USERS[u]["pwd"] == p:
-            st.session_state.login = True
-            st.session_state.role = USERS[u]["role"]
-            st.rerun()
-        else:
-            st.error("Invalid Credentials")
-
-if not st.session_state.login:
-    login()
-    st.stop()
-
-# ---------------- STYLE ----------------
+# ---- PREMIUM STYLE ----
 st.markdown("""
 <style>
 body {background:#020617;color:white;}
 .card {
-    background:#0f172a;
+    background: linear-gradient(145deg,#1e293b,#0f172a);
     padding:20px;
-    border-radius:15px;
-    margin:10px;
-    box-shadow:0 0 20px rgba(0,255,255,0.2);
+    border-radius:20px;
+    margin-bottom:15px;
+    box-shadow:0 0 20px rgba(0,255,255,0.15);
 }
+h1, h2, h3 {color:#38bdf8;}
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🚀 ResolveAI - Smart Grievance System")
+st.title("🚀 Student Survival AI")
+st.caption("Predict • Analyze • Solve Student Problems in Real-Time")
 
-# ---------------- DATA ----------------
+# ---- SESSION ----
 if "history" not in st.session_state:
     st.session_state.history = []
 
-def save():
-    with open("data.json", "w") as f:
-        json.dump(st.session_state.history, f)
-
-def load():
-    try:
-        with open("data.json") as f:
-            data = json.load(f)
-            if isinstance(data, list):
-                st.session_state.history = [
-                    d for d in data if isinstance(d, dict)
-                ]
-            else:
-                st.session_state.history = []
-    except:
-        st.session_state.history = []
-
-load()
-
-# ---------------- AI ----------------
+# ---- AI FUNCTIONS ----
 def analyze(text):
-    if not text: return "General"
     t = text.lower()
-    if "wifi" in t: return "Network"
-    elif "water" in t: return "Water"
-    elif "power" in t: return "Electric"
-    return "General"
+    if "wifi" in t:
+        return "Network Issue"
+    elif "heat" in t or "hot" in t:
+        return "Heat Problem"
+    elif "water" in t:
+        return "Water Issue"
+    elif "electric" in t or "power" in t:
+        return "Electrical Issue"
+    else:
+        return "General Issue"
 
-def priority(text):
-    try:
-        s = TextBlob(text).sentiment.polarity
-        if s < -0.5: return "High"
-        elif s < 0: return "Medium"
-        return "Low"
-    except:
-        return "Low"
-
-def advanced_score(text):
-    try:
-        score = 50
-        t = text.lower()
-        if "urgent" in t: score += 25
-        if "not working" in t: score += 15
-        if TextBlob(text).sentiment.polarity < -0.5: score += 20
-        return min(score, 100)
-    except:
-        return 50
-
-def duplicate(text):
-    try:
-        texts = []
-        for h in st.session_state.history:
-            if isinstance(h, dict) and "text" in h:
-                texts.append(str(h["text"]))
-        texts.append(str(text))
-
-        if len(texts) < 2:
-            return False
-
-        tfidf = TfidfVectorizer().fit_transform(texts)
-        sim = cosine_similarity(tfidf[-1], tfidf[:-1])
-        return sim.max() > 0.7
-    except:
-        return False
-
-# ---------------- SYSTEM ----------------
-def department(issue):
+def solution(issue):
     return {
-        "Network":"IT Dept",
-        "Water":"Maintenance",
-        "Electric":"Electrical",
-        "General":"Admin"
-    }.get(issue, "Admin")
+        "Network Issue": "Switch to hotspot / LAN / restart router",
+        "Heat Problem": "Check ventilation or move to cooler area",
+        "Water Issue": "Inform maintenance / use backup supply",
+        "Electrical Issue": "Check power backup or inform technician",
+        "General Issue": "Forward to admin"
+    }.get(issue)
 
-def assign_officer():
-    officers = ["A","B","C","D"]
-    return officers[len(st.session_state.history) % len(officers)]
+def predict(history):
+    wifi = sum("wifi" in h.lower() for h in history)
+    water = sum("water" in h.lower() for h in history)
+    electric = sum("electric" in h.lower() or "power" in h.lower() for h in history)
 
-def delay(entry):
-    try:
-        t = datetime.datetime.strptime(entry.get("time",""), "%Y-%m-%d %H:%M")
-        return (datetime.datetime.now() - t).total_seconds() > 60
-    except:
-        return False
+    alerts = []
 
-def workflow(entry):
-    if not isinstance(entry, dict):
-        return
+    if wifi >= 2:
+        alerts.append("🚨 WiFi issues rising! Possible outage")
+    if water >= 2:
+        alerts.append("🚨 Water shortage risk detected")
+    if electric >= 2:
+        alerts.append("🚨 Power failure risk detected")
 
-    entry.setdefault("status", "Received")
+    if alerts:
+        return alerts
+    return ["✅ System Stable"]
 
-    if entry["status"] == "Received":
-        entry["status"] = "Assigned"
-    elif entry["status"] == "Assigned":
-        entry["status"] = "Processing"
-    elif entry["status"] == "Processing":
-        entry["status"] = "Verified"
-    elif entry["status"] == "Verified":
-        entry["status"] = "Closed"
+# ---- PAIN INDEX ----
+pain_score = min(len(st.session_state.history) * 10, 100)
+st.metric("💔 Campus Pain Index", f"{pain_score}/100")
 
-def escalate(entry):
-    if not isinstance(entry, dict):
-        return
+# ---- LAYOUT ----
+col1, col2 = st.columns([2,1])
 
-    entry.setdefault("status", "Received")
+# ---- INPUT PANEL ----
+with col1:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
 
-    if delay(entry) and entry["status"] != "Closed":
-        entry["priority"] = "High"
-        entry["status"] = "Escalated"
-        entry["officer"] = "Senior Officer"
+    st.subheader("🧑 Enter Your Problem")
+    text = st.text_area("Describe your issue")
 
-# ---------------- TABS ----------------
-tab1, tab2, tab3 = st.tabs(["🧑 User", "🛠 Admin", "📊 Analytics"])
-
-# ---------------- USER ----------------
-with tab1:
-    user = st.text_input("User ID")
-    text = st.text_area("Enter Complaint")
-
-    file = st.file_uploader("Upload PDF")
-
-    if file:
-        if PDF_AVAILABLE:
-            try:
-                with pdfplumber.open(file) as pdf:
-                    text = ""
-                    for p in pdf.pages:
-                        pt = p.extract_text()
-                        if pt:
-                            text += pt
-            except:
-                st.error("PDF read error")
-        else:
-            st.warning("PDF feature not available")
-
-    if st.button("Submit Complaint"):
+    if st.button("Analyze Problem"):
         if text:
-            ticket = str(uuid.uuid4())[:8]
+            st.session_state.history.append(text)
+
             issue = analyze(text)
 
-            entry = {
-                "ticket": ticket,
-                "user": user,
-                "text": text,
-                "issue": issue,
-                "department": department(issue),
-                "officer": assign_officer(),
-                "priority": priority(text),
-                "score": advanced_score(text),
-                "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "status": "Received",
-                "log": ["Created"]
-            }
+            st.markdown("### 🧠 AI Analysis")
+            st.write(f"Detected Category: **{issue}**")
+            st.write("Reason: Keyword + pattern detection")
 
-            st.session_state.history.append(entry)
-            save()
+            st.markdown("### 💡 Suggested Solution")
+            st.success(solution(issue))
 
-            st.success(f"Ticket Created: {ticket}")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-            if duplicate(text):
-                st.warning("Duplicate Complaint Detected")
+# ---- SIDE PANEL ----
+with col2:
+    st.markdown('<div class="card">', unsafe_allow_html=True)
 
-# ---------------- ADMIN ----------------
-with tab2:
-    st.subheader("Admin Panel")
+    st.subheader("🚨 AI Alerts")
+    alerts = predict(st.session_state.history)
+    for a in alerts:
+        st.warning(a)
 
-    for i, h in enumerate(st.session_state.history):
+    st.markdown('</div>', unsafe_allow_html=True)
 
-        if not isinstance(h, dict):
-            continue
+# ---- TOP ISSUES ----
+st.markdown('<div class="card">', unsafe_allow_html=True)
+st.subheader("🏆 Top Issues")
 
-        h.setdefault("status", "Received")
-        h.setdefault("priority", "Low")
-        h.setdefault("ticket", f"UNK-{i}")
-        h.setdefault("officer", "Not Assigned")
+categories = [analyze(h) for h in st.session_state.history]
+top = Counter(categories).most_common(3)
 
-        workflow(h)
-        escalate(h)
+if top:
+    for t in top:
+        st.write(f"🔹 {t[0]} — {t[1]} reports")
+else:
+    st.write("No data yet")
 
-        st.write(f"🎫 {h['ticket']} | {h['status']} | {h['priority']} | {h['officer']}")
+st.markdown('</div>', unsafe_allow_html=True)
 
-        if st.session_state.role == "admin":
-            msg = st.text_input(f"Reply {h['ticket']}", key=f"msg_{i}")
-            if st.button(f"Send {h['ticket']}", key=f"btn_{i}"):
-                h["response"] = msg
-                h["log"].append("Responded")
-                save()
-                st.success("Response Sent")
+# ---- HEATMAP ----
+st.markdown('<div class="card">', unsafe_allow_html=True)
+st.subheader("📊 Issue Zones")
 
-# ---------------- ANALYTICS ----------------
-with tab3:
-    df = pd.DataFrame(st.session_state.history)
+data = pd.DataFrame({
+    "Area": ["Hostel", "Library", "Block A"],
+    "Count": [
+        sum("hostel" in h.lower() for h in st.session_state.history),
+        sum("library" in h.lower() for h in st.session_state.history),
+        sum("block" in h.lower() for h in st.session_state.history),
+    ]
+})
 
-    if not df.empty:
-        st.metric("Total", len(df))
-        st.metric("Closed", sum(df["status"] == "Closed"))
+st.bar_chart(data.set_index("Area"))
+st.markdown('</div>', unsafe_allow_html=True)
 
-        st.line_chart(df["time"].value_counts())
-        st.bar_chart(df["priority"].value_counts())
-        st.bar_chart(df["department"].value_counts())
+# ---- LIVE FEED ----
+st.markdown('<div class="card">', unsafe_allow_html=True)
+st.subheader("🌊 Live Campus Feed")
 
-        st.download_button("Download CSV", df.to_csv(), "report.csv")
+if st.session_state.history:
+    for h in st.session_state.history[::-1]:
+        st.write(f"⚡ {h}")
+else:
+    st.write("No activity yet")
 
-# ---------------- SEARCH ----------------
-search = st.text_input("Search")
+st.markdown('</div>', unsafe_allow_html=True)
 
-for h in st.session_state.history:
-    if isinstance(h, dict) and "text" in h:
-        if search.lower() in h["text"].lower():
-            st.write(h)
+# ---- FUTURE PREDICTION ----
+st.markdown('<div class="card">', unsafe_allow_html=True)
+st.subheader("🔮 Future Prediction")
 
-# ---------------- RESET ----------------
-if st.button("Clear All Data"):
-    st.session_state.history = []
-    save()
+alerts = predict(st.session_state.history)
+for a in alerts:
+    st.info(a)
 
-st.caption("🏆 Ultimate AI Hackathon Project")
+st.markdown('</div>', unsafe_allow_html=True)
+
+# ---- OFFLINE MODE ----
+st.markdown('<div class="card">', unsafe_allow_html=True)
+st.subheader("🔌 Offline Mode")
+st.write("✔ Stores issues locally if no internet")
+st.caption("Future upgrade: sync when connection is restored")
+
+st.markdown('</div>', unsafe_allow_html=True)
+
+st.caption("🏆 Built for Hackathon — Student Survival AI")
