@@ -1,7 +1,14 @@
 import streamlit as st
 import pandas as pd
 import datetime, json, uuid
-import pdfplumber
+
+# SAFE PDF IMPORT
+try:
+    import pdfplumber
+    PDF_AVAILABLE = True
+except:
+    PDF_AVAILABLE = False
+
 from textblob import TextBlob
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
@@ -26,7 +33,6 @@ def login():
         if u in USERS and USERS[u]["pwd"] == p:
             st.session_state.login = True
             st.session_state.role = USERS[u]["role"]
-            st.success("Login Success")
             st.rerun()
         else:
             st.error("Invalid Credentials")
@@ -56,20 +62,27 @@ if "history" not in st.session_state:
     st.session_state.history = []
 
 def save():
-    with open("data.json","w") as f:
-        json.dump(st.session_state.history,f)
+    with open("data.json", "w") as f:
+        json.dump(st.session_state.history, f)
 
 def load():
     try:
         with open("data.json") as f:
-            st.session_state.history = json.load(f)
+            data = json.load(f)
+            if isinstance(data, list):
+                st.session_state.history = [
+                    d for d in data if isinstance(d, dict)
+                ]
+            else:
+                st.session_state.history = []
     except:
-        pass
+        st.session_state.history = []
 
 load()
 
 # ---------------- AI ----------------
 def analyze(text):
+    if not text: return "General"
     t = text.lower()
     if "wifi" in t: return "Network"
     elif "water" in t: return "Water"
@@ -77,31 +90,41 @@ def analyze(text):
     return "General"
 
 def priority(text):
-    s = TextBlob(text).sentiment.polarity
-    if s < -0.5: return "High"
-    elif s < 0: return "Medium"
-    return "Low"
+    try:
+        s = TextBlob(text).sentiment.polarity
+        if s < -0.5: return "High"
+        elif s < 0: return "Medium"
+        return "Low"
+    except:
+        return "Low"
 
 def advanced_score(text):
-    score = 50
-    t = text.lower()
-
-    if "urgent" in t: score += 25
-    if "not working" in t: score += 15
-    if TextBlob(text).sentiment.polarity < -0.5: score += 20
-
-    return min(score, 100)
+    try:
+        score = 50
+        t = text.lower()
+        if "urgent" in t: score += 25
+        if "not working" in t: score += 15
+        if TextBlob(text).sentiment.polarity < -0.5: score += 20
+        return min(score, 100)
+    except:
+        return 50
 
 def duplicate(text):
-    if not st.session_state.history:
+    try:
+        texts = []
+        for h in st.session_state.history:
+            if isinstance(h, dict) and "text" in h:
+                texts.append(str(h["text"]))
+        texts.append(str(text))
+
+        if len(texts) < 2:
+            return False
+
+        tfidf = TfidfVectorizer().fit_transform(texts)
+        sim = cosine_similarity(tfidf[-1], tfidf[:-1])
+        return sim.max() > 0.7
+    except:
         return False
-
-    texts = [h["text"] for h in st.session_state.history] + [text]
-
-    tfidf = TfidfVectorizer().fit_transform(texts)
-    sim = cosine_similarity(tfidf[-1], tfidf[:-1])
-
-    return sim.max() > 0.7
 
 # ---------------- SYSTEM ----------------
 def department(issue):
@@ -110,17 +133,25 @@ def department(issue):
         "Water":"Maintenance",
         "Electric":"Electrical",
         "General":"Admin"
-    }.get(issue)
+    }.get(issue, "Admin")
 
 def assign_officer():
     officers = ["A","B","C","D"]
     return officers[len(st.session_state.history) % len(officers)]
 
 def delay(entry):
-    t = datetime.datetime.strptime(entry["time"], "%Y-%m-%d %H:%M")
-    return (datetime.datetime.now() - t).total_seconds() > 60
+    try:
+        t = datetime.datetime.strptime(entry.get("time",""), "%Y-%m-%d %H:%M")
+        return (datetime.datetime.now() - t).total_seconds() > 60
+    except:
+        return False
 
 def workflow(entry):
+    if not isinstance(entry, dict):
+        return
+
+    entry.setdefault("status", "Received")
+
     if entry["status"] == "Received":
         entry["status"] = "Assigned"
     elif entry["status"] == "Assigned":
@@ -131,6 +162,11 @@ def workflow(entry):
         entry["status"] = "Closed"
 
 def escalate(entry):
+    if not isinstance(entry, dict):
+        return
+
+    entry.setdefault("status", "Received")
+
     if delay(entry) and entry["status"] != "Closed":
         entry["priority"] = "High"
         entry["status"] = "Escalated"
@@ -145,16 +181,20 @@ with tab1:
     text = st.text_area("Enter Complaint")
 
     file = st.file_uploader("Upload PDF")
+
     if file:
-        try:
-            with pdfplumber.open(file) as pdf:
-                text = ""
-                for p in pdf.pages:
-                    page_text = p.extract_text()
-                    if page_text:
-                        text += page_text
-        except:
-            st.error("Error reading PDF")
+        if PDF_AVAILABLE:
+            try:
+                with pdfplumber.open(file) as pdf:
+                    text = ""
+                    for p in pdf.pages:
+                        pt = p.extract_text()
+                        if pt:
+                            text += pt
+            except:
+                st.error("PDF read error")
+        else:
+            st.warning("PDF feature not available")
 
     if st.button("Submit Complaint"):
         if text:
@@ -188,6 +228,15 @@ with tab2:
     st.subheader("Admin Panel")
 
     for i, h in enumerate(st.session_state.history):
+
+        if not isinstance(h, dict):
+            continue
+
+        h.setdefault("status", "Received")
+        h.setdefault("priority", "Low")
+        h.setdefault("ticket", f"UNK-{i}")
+        h.setdefault("officer", "Not Assigned")
+
         workflow(h)
         escalate(h)
 
@@ -206,20 +255,11 @@ with tab3:
     df = pd.DataFrame(st.session_state.history)
 
     if not df.empty:
-        st.subheader("📊 KPI")
-        total = len(df)
-        closed = sum(df["status"] == "Closed")
+        st.metric("Total", len(df))
+        st.metric("Closed", sum(df["status"] == "Closed"))
 
-        st.metric("Total", total)
-        st.metric("Closed", closed)
-
-        st.subheader("Trend")
         st.line_chart(df["time"].value_counts())
-
-        st.subheader("Priority")
         st.bar_chart(df["priority"].value_counts())
-
-        st.subheader("Departments")
         st.bar_chart(df["department"].value_counts())
 
         st.download_button("Download CSV", df.to_csv(), "report.csv")
@@ -228,8 +268,9 @@ with tab3:
 search = st.text_input("Search")
 
 for h in st.session_state.history:
-    if search.lower() in h["text"].lower():
-        st.write(h)
+    if isinstance(h, dict) and "text" in h:
+        if search.lower() in h["text"].lower():
+            st.write(h)
 
 # ---------------- RESET ----------------
 if st.button("Clear All Data"):
