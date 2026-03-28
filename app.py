@@ -1,211 +1,212 @@
 import streamlit as st
 import pandas as pd
 from collections import Counter
-import datetime
-import json
+import datetime, json, uuid
+import pdfplumber
+from textblob import TextBlob
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.metrics.pairwise import cosine_similarity
 
-st.set_page_config(page_title="Student Survival AI", layout="wide")
+st.set_page_config(page_title="ResolveAI System", layout="wide")
 
-# ---- PREMIUM STYLE ----
+# ---------------- LOGIN ----------------
+USERS = {
+    "admin": {"pwd": "1234", "role": "admin"},
+    "student": {"pwd": "1111", "role": "user"}
+}
+
+if "login" not in st.session_state:
+    st.session_state.login = False
+    st.session_state.role = None
+
+def login():
+    st.title("🔐 ResolveAI Secure Login")
+    u = st.text_input("Username")
+    p = st.text_input("Password", type="password")
+    if st.button("Login"):
+        if u in USERS and USERS[u]["pwd"] == p:
+            st.session_state.login = True
+            st.session_state.role = USERS[u]["role"]
+            st.success("Login Success")
+            st.rerun()
+        else:
+            st.error("Invalid Credentials")
+
+if not st.session_state.login:
+    login()
+    st.stop()
+
+# ---------------- STYLE ----------------
 st.markdown("""
 <style>
 body {background:#020617;color:white;}
-.card {
-    background: linear-gradient(145deg,#1e293b,#0f172a);
-    padding:20px;
-    border-radius:20px;
-    margin-bottom:15px;
-    box-shadow:0 0 25px rgba(0,255,255,0.25);
-    transition:0.3s;
-}
-.card:hover{
-    transform:scale(1.01);
-}
-h1, h2, h3 {color:#38bdf8;}
-textarea, input {
-    background:#0f172a !important;
-    color:white !important;
-}
+.card {background:#0f172a;padding:20px;border-radius:15px;margin:10px;
+box-shadow:0 0 20px rgba(0,255,255,0.2);}
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🚀 Student Survival AI")
-st.caption("Predict • Analyze • Solve Student Problems in Real-Time")
+st.title("🚀 ResolveAI - Smart Grievance System")
 
-# ---- SESSION ----
+# ---------------- DATA ----------------
 if "history" not in st.session_state:
     st.session_state.history = []
 
-# ---- SAVE / LOAD ----
-def save_data():
-    with open("data.json", "w") as f:
-        json.dump(st.session_state.history, f)
+def save():
+    with open("data.json","w") as f:
+        json.dump(st.session_state.history,f)
 
-def load_data():
+def load():
     try:
-        with open("data.json", "r") as f:
+        with open("data.json") as f:
             st.session_state.history = json.load(f)
-    except:
-        pass
+    except: pass
 
-load_data()
+load()
 
-# ---- AI FUNCTIONS ----
+# ---------------- AI ----------------
 def analyze(text):
-    t = text.lower()
-    if "wifi" in t:
-        return "Network Issue"
-    elif "heat" in t or "hot" in t:
-        return "Heat Problem"
-    elif "water" in t:
-        return "Water Issue"
-    elif "electric" in t or "power" in t:
-        return "Electrical Issue"
-    else:
-        return "General Issue"
+    t=text.lower()
+    if "wifi" in t: return "Network"
+    elif "water" in t: return "Water"
+    elif "power" in t: return "Electric"
+    return "General"
 
+def priority(text):
+    s=TextBlob(text).sentiment.polarity
+    return "High" if s<-0.5 else "Medium" if s<0 else "Low"
 
-def solution(issue):
+def advanced_score(text):
+    score=50
+    if "urgent" in text.lower(): score+=25
+    if "not working" in text.lower(): score+=15
+    if TextBlob(text).sentiment.polarity < -0.5: score+=20
+    return min(score,100)
+
+def duplicate(text):
+    if not st.session_state.history: return False
+    texts=[h["text"] for h in st.session_state.history]+[text]
+    tfidf=TfidfVectorizer().fit_transform(texts)
+    sim=cosine_similarity(tfidf[-1],tfidf[:-1])
+    return sim.max()>0.7
+
+# ---------------- SYSTEM ----------------
+def department(issue):
     return {
-        "Network Issue": "Switch to hotspot / LAN / restart router",
-        "Heat Problem": "Check ventilation or move to cooler area",
-        "Water Issue": "Inform maintenance / use backup supply",
-        "Electrical Issue": "Check power backup or inform technician",
-        "General Issue": "Forward to admin"
+        "Network":"IT Dept",
+        "Water":"Maintenance",
+        "Electric":"Electrical",
+        "General":"Admin"
     }.get(issue)
 
+def assign_officer():
+    officers=["A","B","C","D"]
+    return officers[len(st.session_state.history)%len(officers)]
 
-def predict(history):
-    wifi = sum("wifi" in h.lower() for h in history)
-    water = sum("water" in h.lower() for h in history)
-    electric = sum("electric" in h.lower() or "power" in h.lower() for h in history)
+def delay(entry):
+    t=datetime.datetime.strptime(entry["time"],"%Y-%m-%d %H:%M")
+    return (datetime.datetime.now()-t).seconds>60
 
-    alerts = []
+def workflow(entry):
+    if entry["status"]=="Received": entry["status"]="Assigned"
+    elif entry["status"]=="Assigned": entry["status"]="Processing"
+    elif entry["status"]=="Processing": entry["status"]="Verified"
+    elif entry["status"]=="Verified": entry["status"]="Closed"
 
-    if wifi >= 2:
-        alerts.append("🚨 WiFi issues rising! Possible outage")
-    if water >= 2:
-        alerts.append("🚨 Water shortage risk detected")
-    if electric >= 2:
-        alerts.append("🚨 Power failure risk detected")
+def escalate(entry):
+    if delay(entry):
+        entry["priority"]="High"
+        entry["status"]="Escalated"
+        entry["officer"]="Senior Officer"
 
-    if alerts:
-        return alerts
-    return ["✅ System Stable"]
+# ---------------- TABS ----------------
+tab1,tab2,tab3 = st.tabs(["🧑 User","🛠 Admin","📊 Analytics"])
 
-# ---- PAIN INDEX ----
-pain_score = min(len(st.session_state.history) * 10, 100)
-st.metric("💔 Campus Pain Index", f"{pain_score}/100")
+# ---------------- USER ----------------
+with tab1:
+    user=st.text_input("User ID")
+    text=st.text_area("Enter Complaint")
 
-# ---- LAYOUT ----
-col1, col2 = st.columns([2,1])
+    file=st.file_uploader("Upload PDF")
+    if file:
+        with pdfplumber.open(file) as pdf:
+            text="".join([p.extract_text() for p in pdf.pages])
 
-# ---- INPUT PANEL ----
-with col1:
-    st.markdown('<div class="card">', unsafe_allow_html=True)
-
-    st.subheader("🧑 Enter Your Problem")
-    text = st.text_area("Describe your issue")
-
-    if st.button("Analyze Problem"):
+    if st.button("Submit Complaint"):
         if text:
-            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
-            entry = f"[{timestamp}] {text}"
+            ticket=str(uuid.uuid4())[:8]
+            issue=analyze(text)
+
+            entry={
+                "ticket":ticket,
+                "user":user,
+                "text":text,
+                "issue":issue,
+                "department":department(issue),
+                "officer":assign_officer(),
+                "priority":priority(text),
+                "score":advanced_score(text),
+                "time":datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
+                "status":"Received",
+                "log":["Created"]
+            }
+
             st.session_state.history.append(entry)
-            save_data()
+            save()
 
-            issue = analyze(text)
+            st.success(f"Ticket Created: {ticket}")
 
-            st.markdown("### 🧠 AI Analysis")
-            st.write(f"Detected Category: **{issue}**")
-            st.write("Reason: Keyword + pattern detection")
+            if duplicate(text):
+                st.warning("Duplicate Complaint Detected")
 
-            st.markdown("### 💡 Suggested Solution")
-            st.success(solution(issue))
+# ---------------- ADMIN ----------------
+with tab2:
+    st.subheader("Admin Panel")
 
-    st.markdown('</div>', unsafe_allow_html=True)
+    for h in st.session_state.history:
+        workflow(h)
+        escalate(h)
 
-# ---- SIDE PANEL ----
-with col2:
-    st.markdown('<div class="card">', unsafe_allow_html=True)
+        st.write(f"🎫 {h['ticket']} | {h['status']} | {h['priority']}")
 
-    st.subheader("🚨 AI Alerts")
-    alerts = predict(st.session_state.history)
-    for a in alerts:
-        st.warning(a)
+        if st.session_state.role=="admin":
+            msg=st.text_input(f"Reply {h['ticket']}")
+            if st.button(f"Send {h['ticket']}"):
+                h["response"]=msg
+                h["log"].append("Responded")
 
-    st.markdown('</div>', unsafe_allow_html=True)
+# ---------------- ANALYTICS ----------------
+with tab3:
+    df=pd.DataFrame(st.session_state.history)
 
-# ---- TOP ISSUES ----
-st.markdown('<div class="card">', unsafe_allow_html=True)
-st.subheader("🏆 Top Issues")
+    if not df.empty:
+        st.subheader("📊 KPI")
+        total=len(df)
+        closed=sum(df["status"]=="Closed")
 
-categories = [analyze(h) for h in st.session_state.history]
-top = Counter(categories).most_common(3)
+        st.metric("Total",total)
+        st.metric("Closed",closed)
 
-if top:
-    for t in top:
-        st.write(f"🔹 {t[0]} — {t[1]} reports")
-else:
-    st.write("No data yet")
+        st.subheader("Trend")
+        st.line_chart(df["time"].value_counts())
 
-st.markdown('</div>', unsafe_allow_html=True)
+        st.subheader("Priority")
+        st.bar_chart(df["priority"].value_counts())
 
-# ---- HEATMAP ----
-st.markdown('<div class="card">', unsafe_allow_html=True)
-st.subheader("📊 Issue Zones")
+        st.subheader("Departments")
+        st.bar_chart(df["department"].value_counts())
 
-data = pd.DataFrame({
-    "Area": ["Hostel", "Library", "Block A"],
-    "Count": [
-        sum("hostel" in h.lower() for h in st.session_state.history),
-        sum("library" in h.lower() for h in st.session_state.history),
-        sum("block" in h.lower() for h in st.session_state.history),
-    ]
-})
+        st.download_button("Download CSV",df.to_csv(),"report.csv")
 
-st.bar_chart(data.set_index("Area"))
-st.markdown('</div>', unsafe_allow_html=True)
+# ---------------- SEARCH ----------------
+search=st.text_input("Search")
 
-# ---- LIVE FEED ----
-st.markdown('<div class="card">', unsafe_allow_html=True)
-st.subheader("🌊 Live Campus Feed")
+for h in st.session_state.history:
+    if search.lower() in h["text"].lower():
+        st.write(h)
 
-if st.session_state.history:
-    for h in st.session_state.history[::-1]:
-        st.write(f"⚡ {h}")
-else:
-    st.write("No activity yet")
-
-st.markdown('</div>', unsafe_allow_html=True)
-
-# ---- FUTURE PREDICTION ----
-st.markdown('<div class="card">', unsafe_allow_html=True)
-st.subheader("🔮 Future Prediction")
-
-alerts = predict(st.session_state.history)
-for a in alerts:
-    st.info(a)
-
-st.markdown('</div>', unsafe_allow_html=True)
-
-# ---- OFFLINE MODE ----
-st.markdown('<div class="card">', unsafe_allow_html=True)
-st.subheader("🔌 Offline Mode")
-st.write("✔ Stores issues locally if no internet")
-st.caption("Auto sync ready for future cloud integration")
-
-st.markdown('</div>', unsafe_allow_html=True)
-
-# ---- ADMIN PANEL ----
-st.markdown('<div class="card">', unsafe_allow_html=True)
-st.subheader("🛠 Admin Controls")
-
+# ---------------- RESET ----------------
 if st.button("Clear All Data"):
-    st.session_state.history = []
-    save_data()
-    st.success("Data Cleared")
+    st.session_state.history=[]
+    save()
 
-st.markdown('</div>', unsafe_allow_html=True)
-
-st.caption("🏆 Hackathon Final Level • Playstore Ready UI")
+st.caption("🏆 Ultimate AI Hackathon Project")
