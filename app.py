@@ -1,19 +1,30 @@
 import streamlit as st
 import pandas as pd
-import datetime, json, uuid
-
-# SAFE PDF IMPORT
-try:
-    import pdfplumber
-    PDF_AVAILABLE = True
-except:
-    PDF_AVAILABLE = False
-
+import datetime, json, uuid, time, random, os
 from textblob import TextBlob
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from collections import defaultdict
+import numpy as np
 
-st.set_page_config(page_title="ResolveAI System", layout="wide")
+# VISUAL + MAP
+import folium
+from streamlit_folium import st_folium
+import matplotlib.pyplot as plt
+
+# AI + EMAIL
+from openai import OpenAI
+import smtplib
+from email.mime.text import MIMEText
+
+# ---------------- CONFIG ----------------
+st.set_page_config(page_title="ResolveAI BAAP LEVEL", layout="wide")
+
+# ---------------- API KEYS (SAFE) ----------------
+client = OpenAI(api_key=os.getenv("sk-...k2IA"))
+
+EMAIL_USER = os.getenv("EMAIL_USER")
+EMAIL_PASS = os.getenv("EMAIL_PASS")
 
 # ---------------- LOGIN ----------------
 USERS = {
@@ -41,21 +52,18 @@ if not st.session_state.login:
     login()
     st.stop()
 
-# ---------------- STYLE ----------------
+# ---------------- UI ----------------
 st.markdown("""
 <style>
 body {background:#020617;color:white;}
-.card {
-    background:#0f172a;
-    padding:20px;
-    border-radius:15px;
-    margin:10px;
-    box-shadow:0 0 20px rgba(0,255,255,0.2);
-}
+h1,h2,h3{color:#00ffff;}
+.stButton>button {
+background: linear-gradient(90deg,#00ffff,#0077ff);
+color:black;border-radius:10px;}
 </style>
 """, unsafe_allow_html=True)
 
-st.title("🚀 ResolveAI - Smart Grievance System")
+st.title("🚀 ResolveAI BAAP LEVEL AI SYSTEM")
 
 # ---------------- DATA ----------------
 if "history" not in st.session_state:
@@ -68,213 +76,227 @@ def save():
 def load():
     try:
         with open("data.json") as f:
-            data = json.load(f)
-            if isinstance(data, list):
-                st.session_state.history = [
-                    d for d in data if isinstance(d, dict)
-                ]
-            else:
-                st.session_state.history = []
+            st.session_state.history = json.load(f)
     except:
         st.session_state.history = []
 
 load()
 
-# ---------------- AI ----------------
-def analyze(text):
-    if not text: return "General"
+# ---------------- CORE AI ----------------
+def detect_issue(text):
     t = text.lower()
     if "wifi" in t: return "Network"
+    elif "food" in t: return "Food"
     elif "water" in t: return "Water"
     elif "power" in t: return "Electric"
     return "General"
 
-def priority(text):
+def sentiment_priority(text):
+    s = TextBlob(text).sentiment.polarity
+    if s < -0.5: return "High"
+    elif s < 0: return "Medium"
+    return "Low"
+
+def smart_score(text):
+    score = 50
+    if "urgent" in text.lower(): score += 20
+    if "not working" in text.lower(): score += 20
+    score += abs(TextBlob(text).sentiment.polarity) * 30
+    return min(int(score), 100)
+
+def detect_duplicate(text):
+    texts = [h["text"] for h in st.session_state.history]
+    texts.append(text)
+    if len(texts) < 2: return False
+    tfidf = TfidfVectorizer().fit_transform(texts)
+    sim = cosine_similarity(tfidf[-1], tfidf[:-1])
+    return sim.max() > 0.7
+
+# ---------------- GPT AI ----------------
+def gpt_ai_analysis(text):
     try:
-        s = TextBlob(text).sentiment.polarity
-        if s < -0.5: return "High"
-        elif s < 0: return "Medium"
-        return "Low"
+        res = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role":"system","content":"You are a campus AI problem predictor."},
+                {"role":"user","content":text}
+            ]
+        )
+        return res.choices[0].message.content
     except:
-        return "Low"
+        return "AI unavailable"
 
-def advanced_score(text):
+# ---------------- EMAIL ----------------
+def send_email_alert(subject, message):
     try:
-        score = 50
-        t = text.lower()
-        if "urgent" in t: score += 25
-        if "not working" in t: score += 15
-        if TextBlob(text).sentiment.polarity < -0.5: score += 20
-        return min(score, 100)
+        msg = MIMEText(message)
+        msg['Subject'] = subject
+        msg['From'] = EMAIL_USER
+        msg['To'] = EMAIL_USER
+
+        server = smtplib.SMTP("smtp.gmail.com", 587)
+        server.starttls()
+        server.login(EMAIL_USER, EMAIL_PASS)
+        server.send_message(msg)
+        server.quit()
     except:
-        return 50
+        pass
 
-def duplicate(text):
-    try:
-        texts = []
-        for h in st.session_state.history:
-            if isinstance(h, dict) and "text" in h:
-                texts.append(str(h["text"]))
-        texts.append(str(text))
+# ---------------- HEATMAP ----------------
+def wifi_heatmap(data):
+    m = folium.Map(location=[17.38,78.48], zoom_start=15)
+    for d in data:
+        if d["issue"] == "Network":
+            color = "green"
+            if d["priority"] == "High": color = "red"
+            elif d["priority"] == "Medium": color = "orange"
 
-        if len(texts) < 2:
-            return False
+            folium.CircleMarker(
+                location=[d["lat"], d["lon"]],
+                radius=10,
+                color=color,
+                fill=True
+            ).add_to(m)
+    st_folium(m, width=900)
 
-        tfidf = TfidfVectorizer().fit_transform(texts)
-        sim = cosine_similarity(tfidf[-1], tfidf[:-1])
-        return sim.max() > 0.7
-    except:
-        return False
+# ---------------- PREDICTION ----------------
+def predict_wifi_failure(data):
+    loc_count = defaultdict(int)
+    for d in data:
+        if d["issue"] == "Network":
+            loc_count[d["location"]] += 1
 
-# ---------------- SYSTEM ----------------
-def department(issue):
-    return {
-        "Network":"IT Dept",
-        "Water":"Maintenance",
-        "Electric":"Electrical",
-        "General":"Admin"
-    }.get(issue, "Admin")
+    alerts = []
+    for loc, count in loc_count.items():
+        if count >= 5:
+            alerts.append(f"🚨 WiFi Failure Likely at {loc}")
+    return alerts
 
-def assign_officer():
-    officers = ["A","B","C","D"]
-    return officers[len(st.session_state.history) % len(officers)]
+# ---------------- ADVANCED AI ----------------
+def anomaly_detection(data):
+    scores = [d.get("score",50) for d in data]
+    if len(scores) < 5: return []
+    mean, std = np.mean(scores), np.std(scores)
+    return [f"🚨 Anomaly at {d['location']}"
+            for d in data if d.get("score",50) > mean + 2*std]
 
-def delay(entry):
-    try:
-        t = datetime.datetime.strptime(entry.get("time",""), "%Y-%m-%d %H:%M")
-        return (datetime.datetime.now() - t).total_seconds() > 60
-    except:
-        return False
+def complaint_clusters(data):
+    texts = [d["text"] for d in data]
+    if len(texts) < 2: return []
+    vec = TfidfVectorizer().fit_transform(texts)
+    sim = cosine_similarity(vec)
+    clusters = []
+    for i in range(len(texts)):
+        for j in range(i+1, len(texts)):
+            if sim[i][j] > 0.8:
+                clusters.append("🔁 Similar complaints detected")
+    return clusters
 
-def workflow(entry):
-    if not isinstance(entry, dict):
-        return
+def campus_health_score(data):
+    if not data: return 100
+    avg = sum([d.get("score",50) for d in data]) / len(data)
+    return int(100 - avg)
 
-    entry.setdefault("status", "Received")
+# ---------------- IoT SIMULATION ----------------
+def wifi_signal_chart():
+    locations = ["Hostel A","Hostel B","Library","Canteen"]
+    signals = [random.randint(20,100) for _ in locations]
 
-    if entry["status"] == "Received":
-        entry["status"] = "Assigned"
-    elif entry["status"] == "Assigned":
-        entry["status"] = "Processing"
-    elif entry["status"] == "Processing":
-        entry["status"] = "Verified"
-    elif entry["status"] == "Verified":
-        entry["status"] = "Closed"
-
-def escalate(entry):
-    if not isinstance(entry, dict):
-        return
-
-    entry.setdefault("status", "Received")
-
-    if delay(entry) and entry["status"] != "Closed":
-        entry["priority"] = "High"
-        entry["status"] = "Escalated"
-        entry["officer"] = "Senior Officer"
+    fig, ax = plt.subplots()
+    ax.bar(locations, signals)
+    st.pyplot(fig)
 
 # ---------------- TABS ----------------
-tab1, tab2, tab3 = st.tabs(["🧑 User", "🛠 Admin", "📊 Analytics"])
+tab1, tab2, tab3 = st.tabs(["🧑 User","🛠 Admin","📊 Analytics"])
 
 # ---------------- USER ----------------
 with tab1:
+    st.subheader("Submit Complaint")
+
     user = st.text_input("User ID")
-    text = st.text_area("Enter Complaint")
-
-    file = st.file_uploader("Upload PDF")
-
-    if file:
-        if PDF_AVAILABLE:
-            try:
-                with pdfplumber.open(file) as pdf:
-                    text = ""
-                    for p in pdf.pages:
-                        pt = p.extract_text()
-                        if pt:
-                            text += pt
-            except:
-                st.error("PDF read error")
-        else:
-            st.warning("PDF feature not available")
+    location = st.text_input("Location")
+    lat = st.number_input("Latitude", value=17.38)
+    lon = st.number_input("Longitude", value=78.48)
+    text = st.text_area("Complaint")
 
     if st.button("Submit Complaint"):
         if text:
-            ticket = str(uuid.uuid4())[:8]
-            issue = analyze(text)
+            issue = detect_issue(text)
 
             entry = {
-                "ticket": ticket,
+                "ticket": str(uuid.uuid4())[:8],
                 "user": user,
                 "text": text,
                 "issue": issue,
-                "department": department(issue),
-                "officer": assign_officer(),
-                "priority": priority(text),
-                "score": advanced_score(text),
-                "time": datetime.datetime.now().strftime("%Y-%m-%d %H:%M"),
-                "status": "Received",
-                "log": ["Created"]
+                "location": location,
+                "lat": lat,
+                "lon": lon,
+                "priority": sentiment_priority(text),
+                "score": smart_score(text),
+                "time": str(datetime.datetime.now())
             }
 
             st.session_state.history.append(entry)
             save()
 
-            st.success(f"Ticket Created: {ticket}")
+            st.success("Complaint Submitted!")
 
-            if duplicate(text):
-                st.warning("Duplicate Complaint Detected")
+            # GPT AI
+            ai = gpt_ai_analysis(text)
+            st.info(f"🤖 AI Insight: {ai}")
+
+            # Email alert
+            if entry["priority"] == "High":
+                send_email_alert("🚨 High Priority Issue", text)
+
+            if detect_duplicate(text):
+                st.warning("Duplicate complaint detected!")
 
 # ---------------- ADMIN ----------------
 with tab2:
     st.subheader("Admin Panel")
-
-    for i, h in enumerate(st.session_state.history):
-
-        if not isinstance(h, dict):
-            continue
-
-        h.setdefault("status", "Received")
-        h.setdefault("priority", "Low")
-        h.setdefault("ticket", f"UNK-{i}")
-        h.setdefault("officer", "Not Assigned")
-
-        workflow(h)
-        escalate(h)
-
-        st.write(f"🎫 {h['ticket']} | {h['status']} | {h['priority']} | {h['officer']}")
-
-        if st.session_state.role == "admin":
-            msg = st.text_input(f"Reply {h['ticket']}", key=f"msg_{i}")
-            if st.button(f"Send {h['ticket']}", key=f"btn_{i}"):
-                h["response"] = msg
-                h["log"].append("Responded")
-                save()
-                st.success("Response Sent")
+    for h in st.session_state.history:
+        st.write(h)
 
 # ---------------- ANALYTICS ----------------
 with tab3:
+    st.subheader("Dashboard")
     df = pd.DataFrame(st.session_state.history)
 
     if not df.empty:
-        st.metric("Total", len(df))
-        st.metric("Closed", sum(df["status"] == "Closed"))
+        st.metric("Total Complaints", len(df))
+        st.bar_chart(df["issue"].value_counts())
 
-        st.line_chart(df["time"].value_counts())
-        st.bar_chart(df["priority"].value_counts())
-        st.bar_chart(df["department"].value_counts())
+        st.subheader("📶 WiFi Heatmap")
+        wifi_heatmap(st.session_state.history)
 
-        st.download_button("Download CSV", df.to_csv(), "report.csv")
+        st.subheader("🤖 Predictions")
+        for p in predict_wifi_failure(st.session_state.history):
+            st.error(p)
 
-# ---------------- SEARCH ----------------
-search = st.text_input("Search")
+        st.subheader("🚨 Anomalies")
+        for a in anomaly_detection(st.session_state.history):
+            st.warning(a)
 
-for h in st.session_state.history:
-    if isinstance(h, dict) and "text" in h:
-        if search.lower() in h["text"].lower():
-            st.write(h)
+        st.subheader("🧠 Complaint Clusters")
+        for c in complaint_clusters(st.session_state.history):
+            st.info(c)
+
+        st.subheader("🏫 Campus Health Score")
+        score = campus_health_score(st.session_state.history)
+        st.metric("Health Score", score)
+
+        st.subheader("📡 Live WiFi Signal")
+        wifi_signal_chart()
+
+        st.subheader("🔮 What-if Simulation")
+        test = st.slider("Simulate complaints",1,10,5)
+        if test > 7:
+            st.error("🚨 Failure likely")
+        else:
+            st.warning("⚠️ Moderate risk")
 
 # ---------------- RESET ----------------
-if st.button("Clear All Data"):
+if st.button("Clear Data"):
     st.session_state.history = []
     save()
-
-st.caption("🏆 Ultimate AI Hackathon Project")
