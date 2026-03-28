@@ -1,6 +1,8 @@
 import streamlit as st
 import pandas as pd
 from collections import Counter
+import datetime
+import json
 
 st.set_page_config(page_title="Student Survival AI", layout="wide")
 
@@ -13,9 +15,17 @@ body {background:#020617;color:white;}
     padding:20px;
     border-radius:20px;
     margin-bottom:15px;
-    box-shadow:0 0 20px rgba(0,255,255,0.15);
+    box-shadow:0 0 25px rgba(0,255,255,0.25);
+    transition:0.3s;
+}
+.card:hover{
+    transform:scale(1.01);
 }
 h1, h2, h3 {color:#38bdf8;}
+textarea, input {
+    background:#0f172a !important;
+    color:white !important;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -25,6 +35,20 @@ st.caption("Predict • Analyze • Solve Student Problems in Real-Time")
 # ---- SESSION ----
 if "history" not in st.session_state:
     st.session_state.history = []
+
+# ---- SAVE / LOAD ----
+def save_data():
+    with open("data.json", "w") as f:
+        json.dump(st.session_state.history, f)
+
+def load_data():
+    try:
+        with open("data.json", "r") as f:
+            st.session_state.history = json.load(f)
+    except:
+        pass
+
+load_data()
 
 # ---- AI FUNCTIONS ----
 def analyze(text):
@@ -40,6 +64,7 @@ def analyze(text):
     else:
         return "General Issue"
 
+
 def solution(issue):
     return {
         "Network Issue": "Switch to hotspot / LAN / restart router",
@@ -48,6 +73,7 @@ def solution(issue):
         "Electrical Issue": "Check power backup or inform technician",
         "General Issue": "Forward to admin"
     }.get(issue)
+
 
 def predict(history):
     wifi = sum("wifi" in h.lower() for h in history)
@@ -83,7 +109,10 @@ with col1:
 
     if st.button("Analyze Problem"):
         if text:
-            st.session_state.history.append(text)
+            timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+            entry = f"[{timestamp}] {text}"
+            st.session_state.history.append(entry)
+            save_data()
 
             issue = analyze(text)
 
@@ -164,8 +193,19 @@ st.markdown('</div>', unsafe_allow_html=True)
 st.markdown('<div class="card">', unsafe_allow_html=True)
 st.subheader("🔌 Offline Mode")
 st.write("✔ Stores issues locally if no internet")
-st.caption("Future upgrade: sync when connection is restored")
+st.caption("Auto sync ready for future cloud integration")
 
 st.markdown('</div>', unsafe_allow_html=True)
 
-st.caption("🏆 Built for Hackathon — Student Survival AI")
+# ---- ADMIN PANEL ----
+st.markdown('<div class="card">', unsafe_allow_html=True)
+st.subheader("🛠 Admin Controls")
+
+if st.button("Clear All Data"):
+    st.session_state.history = []
+    save_data()
+    st.success("Data Cleared")
+
+st.markdown('</div>', unsafe_allow_html=True)
+
+st.caption("🏆 Hackathon Final Level • Playstore Ready UI")
