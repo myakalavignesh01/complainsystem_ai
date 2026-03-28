@@ -2,7 +2,6 @@ import streamlit as st
 import pandas as pd
 from collections import Counter
 import datetime, json, uuid
-import pdfplumber
 from textblob import TextBlob
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
