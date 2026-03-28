@@ -4,7 +4,6 @@ numpy
 scikit-learn
 textblob
 matplotlib
-folium
 streamlit-folium
 openai
 geopy
